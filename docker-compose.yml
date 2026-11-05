@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  servicepilot:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      # Set these environment variables to configure the app
+      - SERVICEPILOT_AWS_REGION=us-west-1
+      - SERVICEPILOT_TABLE_NAME=ServicePilotTickets
+      - SERVICEPILOT_API_URL=https://4mps7hcgi7.execute-api.us-west-1.amazonaws.com/tickets
+      # Optional: set AWS profile name if using named credentials
+      # - SERVICEPILOT_AWS_PROFILE=your-profile-name
+      # Optional: enable AI features
+      # - SERVICEPILOT_AI_ENABLED=true
+      # - SERVICEPILOT_AI_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
+      # - SERVICEPILOT_AI_REGION=us-west-1
+    volumes:
+      - ~/.aws:/root/.aws:ro  # Mount AWS credentials (read-only)
+      - ./.streamlit/secrets.toml:/app/.streamlit/secrets.toml:ro  # Mount admin secrets
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

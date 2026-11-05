@@ -1,7 +1,16 @@
 import streamlit as st
-import requests
 
-API_URL = "https://4mps7hcgi7.execute-api.us-west-1.amazonaws.com/tickets"
+from servicepilot.client import ApiError, fingerprint, submit_ticket
+from servicepilot.config import load_settings
+from servicepilot.models import (
+    MAX_DESCRIPTION,
+    PRIORITIES,
+    SERVICE_TYPES,
+    ValidationError,
+    validate_ticket_input,
+)
+
+settings = load_settings()
 
 st.set_page_config(
     page_title="ServicePilot AI",
@@ -9,77 +18,54 @@ st.set_page_config(
 )
 
 st.title("🔧 ServicePilot AI")
-st.write("Submit a service request.")
+st.write("Submit a service request and we will get back to you.")
 
-customer_name = st.text_input("Customer Name")
-email = st.text_input("Email")
+# Fingerprints of tickets already created in this browser session, so a
+# double click or page re-run does not create the same ticket twice.
+submitted = st.session_state.setdefault("submitted", {})
 
-service_type = st.selectbox(
-    "Service Type",
-    [
-        "HVAC",
-        "Plumbing",
-        "Electrical",
-        "Appliance",
-        "Other"
-    ]
-)
+with st.form("service_request"):
+    customer_name = st.text_input("Customer Name", max_chars=100)
+    email = st.text_input("Email (optional)", max_chars=254)
 
-priority = st.selectbox(
-    "Priority",
-    [
-        "Low",
-        "Medium",
-        "High",
-        "Emergency"
-    ]
-)
+    col_a, col_b = st.columns(2)
+    service_type = col_a.selectbox("Service Type", SERVICE_TYPES)
+    priority = col_b.selectbox("Priority", PRIORITIES, index=1)
 
-description = st.text_area("Describe the problem")
+    description = st.text_area(
+        "Describe the problem",
+        max_chars=MAX_DESCRIPTION,
+        help="What is happening, where, and since when?",
+    )
+    send = st.form_submit_button("Submit Service Request", type="primary")
 
-if st.button("Submit Service Request", type="primary"):
-
-    if not customer_name:
-        st.error("Please enter your name.")
-
-    elif not description:
-        st.error("Please describe the problem.")
-
+if send:
+    try:
+        payload = validate_ticket_input(
+            {
+                "customer_name": customer_name,
+                "email": email,
+                "service_type": service_type,
+                "priority": priority,
+                "description": description,
+            }
+        )
+    except ValidationError as err:
+        for message in err.errors:
+            st.error(message)
     else:
-
-        ticket_data = {
-            "customer_name": customer_name,
-            "email": email,
-            "service_type": service_type,
-            "description": description,
-            "priority": priority
-        }
-
-        try:
-            response = requests.post(
-                API_URL,
-                json=ticket_data,
-                timeout=10
-            )
-
-            if response.status_code == 201:
-                result = response.json()
-
-                st.success("Service request submitted!")
-
-                st.write(
-                    f"### Ticket Number: `{result['ticket_id']}`"
-                )
-
-                st.write(
-                    "Save this ticket number for your records."
-                )
-
+        key = fingerprint(payload)
+        if key in submitted:
+            st.info("This request was already submitted.")
+            st.write(f"### Ticket Number: `{submitted[key]}`")
+        else:
+            try:
+                with st.spinner("Submitting..."):
+                    ticket_id = submit_ticket(settings.api_url, payload)
+            except ApiError as err:
+                st.error(str(err))
             else:
-                st.error(
-                    f"Something went wrong. "
-                    f"Status code: {response.status_code}"
-                )
-
-        except requests.exceptions.RequestException as e:
-            st.error(f"Could not connect to ServicePilot API: {e}")
+                submitted[key] = ticket_id
+                st.success("Service request submitted!")
+                st.write(f"### Ticket Number: `{ticket_id}`")
+                st.write("Save this ticket number for your records.")
